@@ -1,0 +1,5 @@
+{
+  "name": "从视频到专业游戏素材的一站式处理",
+  "description": "Extract frames from short videos, remove background colors, and export as image sequences.",
+  "requestFramePermissions": []
+}
