@@ -1,33 +1,40 @@
+# 工作流名称
 name: Deploy to GitHub Pages
 
+# 触发条件：当代码推送到 main 分支时执行
 on:
   push:
-    branches: [main]
+    branches: ["main"]
 
-permissions:  
+# 设置权限
+permissions:
   contents: read
   pages: write
   id-token: write
 
+# 工作流任务
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      # 1. 拉取仓库代码
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v6
+      # 2. 设置 GitHub Pages 环境
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # 3. 上传静态文件（适配 AI Studio 项目结构）
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          node-version: 'lts/*'
+          # 重点：指定静态文件目录
+          # 如果你的 AI Studio 项目静态文件在根目录，用 path: '.'
+          # 如果在 public 目录，用 path: 'public'
+          path: '.'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Deploy
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          folder: dist  
+      # 4. 部署到 GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
