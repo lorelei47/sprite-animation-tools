@@ -76,6 +76,7 @@ export default function App() {
   const [compressionRatio, setCompressionRatio] = useState(0.5);
   const [isCompressing, setIsCompressing] = useState(false);
   const [originalDimensions, setOriginalDimensions] = useState<{width: number, height: number} | null>(null);
+  const [batchCompressionFiles, setBatchCompressionFiles] = useState<{url: string, name: string}[]>([]);
   const [currentStep, setCurrentStep] = useState(1);
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -755,6 +756,64 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const batchCompress = async (source: 'frames' | 'uploaded' = 'frames') => {
+    const filesToCompress = source === 'frames' 
+      ? frames.map((f, i) => ({ url: f.url, name: `frame_${String(i).padStart(4, '0')}.png` }))
+      : batchCompressionFiles;
+
+    if (filesToCompress.length === 0) return;
+    
+    setIsCompressing(true);
+    setBatchProgress(0);
+    
+    const zip = new JSZip();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    for (let i = 0; i < filesToCompress.length; i++) {
+      const file = filesToCompress[i];
+      const img = new Image();
+      img.src = file.url;
+      await new Promise(resolve => img.onload = resolve);
+      
+      const targetWidth = Math.round(img.width * compressionRatio);
+      const targetHeight = Math.round(img.height * compressionRatio);
+      
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+      
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (blob) {
+        zip.file(file.name, blob);
+      }
+      
+      setBatchProgress(Math.round(((i + 1) / filesToCompress.length) * 100));
+    }
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `batch_compressed_${Date.now()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    setIsCompressing(false);
+    setBatchProgress(0);
+    
+    confetti({
+      particleCount: 150,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#10b981', '#34d399', '#6ee7b7']
+    });
   };
 
   const handleExternalFramesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1504,25 +1563,72 @@ export default function App() {
                       </div>
                       <div className="text-center">
                         <p className="font-bold text-sm">上传需要压缩的图像</p>
-                        <p className="text-xs opacity-40 mt-1">支持 PNG/JPG，注重细节保留</p>
+                        <p className="text-xs opacity-40 mt-1">支持 PNG/JPG，可多选进行批量压缩</p>
                       </div>
                       <label className="cursor-pointer px-6 py-2.5 bg-black text-white rounded-2xl text-xs font-bold hover:bg-opacity-90 transition-all shadow-md">
                         <span>选择文件</span>
                         <input 
                           type="file" 
                           accept="image/*" 
+                          multiple
                           className="hidden" 
-                          onChange={handleCompressionUpload}
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (!files) return;
+                            if (files.length === 1) {
+                              handleCompressionUpload(e);
+                            } else {
+                              const batch = Array.from(files).map((f: File) => ({
+                                url: URL.createObjectURL(f),
+                                name: f.name
+                              }));
+                              setBatchCompressionFiles(batch);
+                              
+                              // 设置预览和尺寸
+                              const firstFile = batch[0];
+                              setCompressionSourceUrl(firstFile.url);
+                              const img = new Image();
+                              img.onload = () => {
+                                setOriginalDimensions({ width: img.width, height: img.height });
+                              };
+                              img.src = firstFile.url;
+                            }
+                          }}
                         />
                       </label>
-                      {spriteSheetUrl && (
-                        <button 
-                          onClick={() => setCompressionSource(spriteSheetUrl)}
-                          className="text-[10px] font-bold underline underline-offset-4 opacity-40 hover:opacity-100 transition-all"
-                        >
-                          使用刚才生成的精灵图
-                        </button>
-                      )}
+                      <div className="flex flex-col gap-2 items-center">
+                        {spriteSheetUrl && (
+                          <button 
+                            onClick={() => setCompressionSource(spriteSheetUrl)}
+                            className="text-[10px] font-bold underline underline-offset-4 opacity-40 hover:opacity-100 transition-all"
+                          >
+                            使用刚才生成的精灵图
+                          </button>
+                        )}
+                        {frames.length > 0 && (
+                          <button 
+                            onClick={() => {
+                              const batch = frames.map((f, i) => ({
+                                url: f.url,
+                                name: `frame_${String(i).padStart(4, '0')}.png`
+                              }));
+                              setBatchCompressionFiles(batch);
+                              
+                              // 设置预览和尺寸
+                              const firstFile = batch[0];
+                              setCompressionSourceUrl(firstFile.url);
+                              const img = new Image();
+                              img.onload = () => {
+                                setOriginalDimensions({ width: img.width, height: img.height });
+                              };
+                              img.src = firstFile.url;
+                            }}
+                            className="text-[10px] font-bold underline underline-offset-4 opacity-40 hover:opacity-100 transition-all"
+                          >
+                            批量压缩当前所有序列帧 ({frames.length} 帧)
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-6">
@@ -1581,25 +1687,45 @@ export default function App() {
                       </div>
 
                       <div className="space-y-3">
-                        <button 
-                          onClick={compressImage}
-                          disabled={isCompressing}
-                          className="w-full flex items-center justify-center gap-2 py-4 bg-[#141414] text-white rounded-2xl disabled:opacity-20 disabled:cursor-not-allowed hover:bg-opacity-90 transition-all font-semibold shadow-lg"
-                        >
-                          {isCompressing ? (
-                            <>
-                              <RefreshCw size={18} className="animate-spin" />
-                              <span>正在压缩像素...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Zap size={18} />
-                              <span>开始细节保留压缩</span>
-                            </>
-                          )}
-                        </button>
+                        {batchCompressionFiles.length > 0 ? (
+                          <button 
+                            onClick={() => batchCompress('uploaded')}
+                            disabled={isCompressing}
+                            className="w-full flex items-center justify-center gap-2 py-4 bg-[#141414] text-white rounded-2xl disabled:opacity-20 disabled:cursor-not-allowed hover:bg-opacity-90 transition-all font-semibold shadow-lg"
+                          >
+                            {isCompressing ? (
+                              <>
+                                <RefreshCw size={18} className="animate-spin" />
+                                <span>正在批量压缩 ({batchProgress}%)...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Zap size={18} />
+                                <span>开始批量压缩 ({batchCompressionFiles.length} 张)</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={compressImage}
+                            disabled={isCompressing}
+                            className="w-full flex items-center justify-center gap-2 py-4 bg-[#141414] text-white rounded-2xl disabled:opacity-20 disabled:cursor-not-allowed hover:bg-opacity-90 transition-all font-semibold shadow-lg"
+                          >
+                            {isCompressing ? (
+                              <>
+                                <RefreshCw size={18} className="animate-spin" />
+                                <span>正在压缩像素...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Zap size={18} />
+                                <span>开始细节保留压缩</span>
+                              </>
+                            )}
+                          </button>
+                        )}
 
-                        {compressedUrl && (
+                        {compressedUrl && batchCompressionFiles.length === 0 && (
                           <button 
                             onClick={downloadCompressedImage}
                             className="w-full flex items-center justify-center gap-2 py-4 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition-all font-semibold shadow-lg"
@@ -1614,6 +1740,7 @@ export default function App() {
                             onClick={() => {
                               setCompressionSourceUrl('');
                               setCompressedUrl('');
+                              setBatchCompressionFiles([]);
                             }}
                             className="flex-1 py-3 bg-black/5 text-black rounded-2xl hover:bg-black/10 transition-all font-medium text-sm"
                           >
